@@ -2,7 +2,7 @@ from qdmt.cost import AbstractCostFunction
 from qdmt.model import AbstractModel
 from qdmt.uniform_mps import UniformMps
 from qdmt.fixed_point import RightFixedPoint
-from qdmt.utils.mps import trotter_step
+from qdmt.utils_n.mps import trotter_step
 import numpy as np
 import numpy.typing as npt
 from ncon import ncon

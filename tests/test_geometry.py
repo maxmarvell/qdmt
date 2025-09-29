@@ -1,6 +1,6 @@
 import numpy as np
 import pytest
-from qdmt.utils.geometry import *
+from qdmt.utils_n.geometry import *
 from qdmt.uniform_mps import UniformMps
 from qdmt.cost import HilbertSchmidt
 from ncon import ncon

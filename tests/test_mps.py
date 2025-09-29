@@ -1,6 +1,6 @@
 import pytest
 from qdmt.uniform_mps import UniformMps
-from qdmt.utils.mps import trotter_step
+from qdmt.utils_n.mps import trotter_step
 from qdmt.model import TransverseFieldIsing
 import numpy as np
 from ncon import ncon
