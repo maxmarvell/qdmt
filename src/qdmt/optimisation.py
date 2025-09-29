@@ -240,7 +240,7 @@ class ConjugateGradient(AbstractOptimizer):
                 rB = RightFixedPoint.from_mps(B)
                 C, G = self.fg(B, rB)
             else:
-                alpha = min(alpha * 2, 1)
+                alpha = min(alpha*1.1, 1)
                 B = UniformMps(W)
                 rB = RightFixedPoint.from_mps(B)
 

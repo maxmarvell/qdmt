@@ -10,7 +10,7 @@ from qdmt.transfer_matrix import (
 )
 from typing import Self
 from qdmt.model import AbstractModel
-from qdmt.utils.mps import trotter_step
+from qdmt.utils_n.mps import trotter_step
 from qdmt.fixed_point import RightFixedPoint
 import copy
 
@@ -659,11 +659,12 @@ class EvolvedHilbertSchmidt(AbstractCostFunction):
         return drhoBrhoAdrB
 
 class NaiveEvolvedHilbertSchmidt(AbstractCostFunction):
-    def __init__(self, A: UniformMps, model: AbstractModel, L: int, trotterization_order: int = 2):
+    def __init__(self, A: UniformMps, model: AbstractModel, L: int, trotterization_order: int = 2, GPU: bool = False):
 
         super().__init__(A, L)
 
         self.trotterization_order = trotterization_order
+        self.GPU = GPU
 
         if trotterization_order == 1:
             self.U1, self.U2 = model.trotter_first_order()
@@ -671,6 +672,7 @@ class NaiveEvolvedHilbertSchmidt(AbstractCostFunction):
             self.U1, self.U2 = model.trotter_second_order()
 
         # construct rho(A(0); dt)
+        # one time computation
         self.rhoA = self.compute_rhoA()
         self.rhoArhoA = self.compute_rhoArhoA()
 
@@ -722,15 +724,20 @@ class NaiveEvolvedHilbertSchmidt(AbstractCostFunction):
         L = self.L
         chain = B.mps_chain(self.L)
 
+        # compute drhoBdrB
         tensors = (chain, chain.conj(), rB.tensor)
         indices = [
             [1] + [-i for i in range(1, L+1)] + [2],
             [1] + [-i for i in range(L+1, 2*L+1)] + [3],
             [2, 3]
         ]
+        drhoBdrB = ncon(tensors, indices)
 
-        rhoB = ncon(tensors, indices)
-        return rhoB
+        # tensors = [drhoBdrB, rB.tensor]
+        # indices
+
+        # rhoB = ncon(tensors, indices)
+        return drhoBdrB
         
     def compute_rhoArhoB(self, rhoB: np.ndarray) -> np.complex128:
 
