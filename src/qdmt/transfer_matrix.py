@@ -1,18 +1,70 @@
 from abc import ABC, abstractmethod
 import numpy as np
+from numpy.linalg import LinAlgError
 from ncon import ncon
-from typing import Self
-from scipy.sparse.linalg import eigs
+from typing import Optional, Sequence
+from scipy.sparse.linalg import LinearOperator, eigs, gmres
+from dataclasses import dataclass
+from functools import partial
+import warnings
 
 from qdmt.uniform_mps import UniformMps
 
 class AbstractTransferMatrix(ABC):
 
-    @abstractmethod
-    def __matmul__(self, other):
-        pass
+    _derivative: Optional[np.ndarray]
+
+    def __init__(self, array: np.ndarray, *, tape: Sequence["AbstractTransferMatrix"] = None):
+        if not isinstance(array, np.ndarray):
+            raise TypeError("E must be a numpy array.")
+        if len(array.shape) % 2 != 0:
+            raise ValueError("Balanced number of input and output legs required.")
+        
+        n = len(array.shape) // 2
+        if array.shape[:n] != array.shape[-n:]:
+            raise ValueError("Dimensions of input and output legs should be the same.")
+        
+        self._array = array
+        self._n = n
+        self._derivative = None
+        self.tape = list(tape) if tape is not None else []
+
+    @property
+    def array(self) -> np.ndarray:
+        return self._array
     
-    def __pow__(self, n: int):
+    @property
+    def n(self) -> int:
+        return self._n
+    
+    @abstractmethod
+    def identity_like(self) -> "AbstractTransferMatrix":
+        """blah"""
+
+    @abstractmethod
+    def derivative(self) -> np.ndarray:
+        """Return d/dθ tensor (same shape as `tensor`)."""
+
+    @abstractmethod
+    def __matmul__(self, other) -> "AbstractTransferMatrix":
+        pass
+
+    @abstractmethod
+    def _matvec(self, other) -> "AbstractTransferMatrix":
+        pass
+
+    def to_matrix(self) -> np.ndarray:
+        N = int(np.prod(self.array.shape[:self.n]))
+        return self.array.reshape((N, N))
+
+    def linop(self) -> LinearOperator:
+        return LinearOperator((self._n, self._n), matvec=self._matvec, dtype=self.array.dtype)
+    
+    def __pow__(self, n: int) -> "AbstractTransferMatrix":
+
+        if n == 0:
+            return self.identity_like()
+
         result = None
         power = self
         while n > 0:
@@ -27,41 +79,78 @@ class AbstractTransferMatrix(ABC):
             n //= 2
         return result
 
-    @abstractmethod
-    def derivative(self) -> np.ndarray:
-        pass
+@dataclass
+class RightFixedPoint():
+    tensor: np.ndarray
+    A: np.ndarray
+
+    def derivative(self, v: np.ndarray) -> np.ndarray:
+        _, nb = self.tensor.shape
+        L = LinearOperator((nb ** 2, nb ** 2), matvec=partial(self._pseudoinverse_operator))
+        Rh: np.ndarray = gmres(L, v.reshape(nb ** 2))[0]
+        Rh = Rh.reshape(nb, nb)
+        return ncon((Rh, self.E.B.array, self.array), ((-1, 1), (1, -2, 2), (2, -3)))
+    
+    def _pseudoinverse_operator(self, v: np.ndarray):
+        d, _ = self.array.shape
+        v = v.reshape(d, d)
+
+        # transfermatrix contribution
+        transfer = ncon((v, self.E.array), ((1, 2), (2, 1, -2, -1)))
+
+        # fixed point contribution
+        fixed = np.trace(v @ self.array) * np.eye(d)
+
+        # sum these with the contribution of the identity
+        return v - transfer + fixed
+
 
 class TransferMatrix(AbstractTransferMatrix):
+
+    def __init__(self, array: np.ndarray, *, tape: Sequence["TransferMatrix"] = None):
+        super().__init__(array, tape=tape)
+
+        # dimensions
+        self.Da, self.Db = array.shape[:self.n]
+
+        self._A: Optional[UniformMps] = None
+        self._B: Optional[UniformMps] = None
+
+    @property
+    def A(self) -> Optional[UniformMps]:
+        return self._A
+
+    @property
+    def B(self) -> Optional[UniformMps]:
+        return self._B
     
-    A: UniformMps
-    B: UniformMps
-
-    def __init__(self, tensor: np.ndarray, tape: list = []):
-        self.tensor = tensor
-        self.d1 = tensor.shape[0]
-        self.d2 = tensor.shape[1]
-        self.tape = tape
-        self.D = None
-
     @classmethod
     def new(cls, A: UniformMps, B: UniformMps):
-        tensor = ncon((A.tensor, B.conj), ((-1, 1, -3), (-2, 1, -4)))
-        E = cls(tensor)
-        E.D = ncon((A.tensor, np.eye(B.d), np.eye(B.d)), ((-1, -6, -3), (-2, -5), (-7, -4)))
-        E.A = A
-        E.B = B
-        return E
-
-    def _matvec(self, v):
-        return ncon((self.tensor, v), ((-1, -2, 1, 2), (1, 2)))
+        E = ncon((A.tensor, B.tensor.conj()), ((-1, 1, -3), (-2, 1, -4)))
+        obj = cls(E)
+        obj._A, obj._B = A, B
+        return obj
+    
+    def _compute_derivative(self) -> np.ndarray:
+        if self.A == None or self.B == None:
+            raise ValueError("Can only call _compute_derivative for non-composite transfer matrix object.")
+        Ib = np.eye(self.Db)
+        return ncon([self.A.tensor, Ib, Ib], ((-1, -6, -3), (-2, -5), (-7, -4)))
+    
+    def _matvec(self, v: np.ndarray):
+        if self.A != None and self.B != None:
+            return ncon([self.A.tensor, self.B.tensor, v], [[-1, 3, 1], [-2, 3, 2], [1, 2]])
+        return ncon([self.array, v], [[-1, -2, 1, 2], [1, 2]])
     
     def _rmatvec(self, v):
-        return ncon((v, self.tensor), ((1, 2), (2, 1, -2, -1)))
+        if self.A != None and self.B != None:
+            return ncon([v, self.A.tensor, self.B.tensor], [[1, 2], [-1, 3, 2], [-2, 3, 1]])
+        return ncon([self.array, v], [[-1, -2, 1, 2], [1, 2]])
 
     def __matmul__(self, other):
 
         if isinstance(other, TransferMatrix):
-            tensor = ncon((self.tensor, other.tensor), ((-1, -2, 1, 2), (1, 2, -3, -4)))
+            tensor = ncon((self.array, other.array), ((-1, -2, 1, 2), (1, 2, -3, -4)))
             return TransferMatrix(tensor, [self, other])
         
         if isinstance(other, np.ndarray):
@@ -70,190 +159,220 @@ class TransferMatrix(AbstractTransferMatrix):
             else:
                 raise ValueError("Unsupported operand shape for multiplication.")
             
-        return NotImplemented
+        raise NotImplementedError()
 
     def __rmatmul__(self, other):
         if isinstance(other, np.ndarray) and other.ndim == 2:
             return self._rmatvec(other)
-        return NotImplemented
+        raise NotImplementedError()
     
     def derivative(self):
 
-        if self.D is not None:
-            return self.D
+        if self._derivative is not None:
+            return self._derivative
+        
+        # if no parent tensors simply compute derivative and return
+        elif len(self.tape) == 0:
+            self._derivative = self._compute_derivative()
+            return self._derivative
+        
+        elif len(self.tape) == 2:
+            L = self.tape[0]
+            R = self.tape[1]
 
-        E1 = self.tape[0]
-        E2 = self.tape[1]
+            indices = [[-1, -2, 1, 2, -5, -6, -7], [1, 2, -3, -4]]
+            LRdL = ncon([L.derivative(), R.array], indices)
 
-        self.D = ncon(
-            (E1.derivative(), E2.tensor), 
-            ((-1, -2, 1, 2, -5, -6, -7), (1, 2, -3, -4))
-            ) + ncon(
-                (E1.tensor, E2.derivative()), 
-                ((-1, -2, 1, 2), (1, 2, -3, -4, -5, -6, -7))
-                )
+            indices = [[-1, -2, 1, 2], [1, 2, -3, -4, -5, -6, -7]]
+            LRdR = ncon([L.array, R.derivative()], indices)
 
-        return self.D
+            self._derivative = LRdL + LRdR
+            return self._derivative
+        
+        raise NotImplementedError
     
-    def __pow__(self, n: int):
-
-        if n == 0:
-            d1, d2 = self.d1, self.d2
-            return TransferMatrix(np.identity(d1*d2).reshape(d1, d2, d1, d2))
-
-        return super().__pow__(n)
+    def identity_like(self):
+        I = np.eye(self.n).reshape(*self.array.shape)
+        return TransferMatrix(I)
     
-    def to_matrix(self):
-        Da, Db = self.d1, self.d2
-        return self.tensor.reshape(Da*Db, Da*Db)
-    
-    def fidelity(self) -> np.complex128:
+    def right_fixed_point(self):
+        if self.A is None or self.B is None:
+            raise ValueError("Need A and B to define fixed point.")
+        
+        if self.A is not self.B:
+            warnings.warn("A and B differ: right_fixed_point is not guaranteed.")
+
         M = self.to_matrix()
-        r = eigs(M, k=1, which='LM', return_eigenvectors=False)
-        return r[0]
+        eig, r = eigs(M, k=1, which='LM')
+
+        if np.allclose(eig, [1.]):
+            r = r.reshape((self.Da, self.Db))
+            r /= (np.trace(r) / np.abs(np.trace(r)))
+            r = (r + np.conj(r).T) / 2
+            r *= np.sign(np.trace(r))
+            return RightFixedPoint(r, self.A)
+
+        raise LinAlgError("Transfer matrix has no eigenvalue 1: right fixed point did not converge.")
+
 
 class FirstOrderTrotterizedTransferMatrix(AbstractTransferMatrix):
 
-    A: UniformMps
-    B: UniformMps
-    U1: np.ndarray
-    U2: np.ndarray
+    def __init__(self, array: np.ndarray, *, tape: Sequence["FirstOrderTrotterizedTransferMatrix"] = None):
+        super().__init__(array, tape=tape)
+        self.Da, self.d, self.Db = array.shape[:self.n]
+        self._A: Optional[UniformMps] = None
+        self._B: Optional[UniformMps] = None
+        self._U1: Optional[np.ndarray] = None
+        self._U2: Optional[np.ndarray] = None
 
-    def __init__(self, tensor: np.ndarray, tape: list = []):
-        self.tensor = tensor
-        self.d1, self.p, self.d2 = tensor.shape[0], tensor.shape[1], tensor.shape[2]
-        self.tape = tape
-        self.D = None
+    @property
+    def A(self) -> Optional[UniformMps]:
+        return self._A
+
+    @property
+    def B(self) -> Optional[UniformMps]:
+        return self._B
+    
+    @property
+    def U1(self) -> Optional[np.ndarray]:
+        return self._U1
+
+    @property
+    def U2(self) -> Optional[np.ndarray]:
+        return self._U2
 
     @classmethod
-    def new(cls, A: UniformMps, B: UniformMps, U1, U2):
+    def new(cls, A: UniformMps, B: UniformMps, U1: np.ndarray, U2: np.ndarray):
 
-        tensors = (B.conj, B.conj, U2, U1, A.tensor, A.tensor)
-        indices = ((-3, 1, 2), (2, 3, -6), (-2, 4, 1, 3), (5, 6, 4, -5), (-1, 5, 7), (7, 6, -4))
-        res = ncon(tensors, indices)
-        E = FirstOrderTrotterizedTransferMatrix(res)
+        tensors = [B.conj, B.conj, U2, U1, A.tensor, A.tensor]
+        indices = [(-3, 1, 2), (2, 3, -6), (-2, 4, 1, 3), (5, 6, 4, -5), (-1, 5, 7), (7, 6, -4)]
+        E = ncon(tensors, indices)
 
-        E.A = A
-        E.B = B
-        E.U1 = U1
-        E.U2 = U2
-
-        return E
+        # create object
+        obj = FirstOrderTrotterizedTransferMatrix(E)
+        obj._A, obj._B, obj._U1, obj._U2 = A, B, U1, U2
+        return obj
     
     def __matmul__(self, other):
         if isinstance(other, FirstOrderTrotterizedTransferMatrix):
             indices = [[-1, -2, -3, 1, 2, 3], [1, 2, 3, -4, -5, -6]]
-            tensor = ncon([self.tensor, other.tensor], indices, order=[1, 3, 2])
+            tensor = ncon([self.array, other.array], indices, order=[1, 3, 2])
             return FirstOrderTrotterizedTransferMatrix(tensor, [self, other])
-            
-        return NotImplemented
+
+        raise NotImplementedError()
     
     def derivative(self):
 
-        if self.D is not None:
-            return self.D
+        if self._derivative is not None:
+            return self._derivative
 
         if len(self.tape) == 0:
 
-            Ib = np.eye(self.d2, dtype=complex)
+            self._derivative = self._compute_derivative()
 
-            tensors = (Ib, self.B.conj, self.U2, self.U1, self.A.tensor, self.A.tensor)
-            indices = ((-3, -7), (-9, 1, -6), (-2, 2, -8, 1), (3, 4, 2, -5), (-1, 3, 5), (5, 4, -4))
-            D1 = ncon(tensors, indices)
-
-            tensors = (self.B.conj, Ib, self.U2, self.U1, self.A.tensor, self.A.tensor)
-            indices = ((-3, 1, -7), (-9, -6), (-2, 2, 1, -8), (3, 4, 2, -5), (-1, 3, 5), (5, 4, -4))
-            D2 = ncon(tensors, indices)
-
-            self.D = D1 + D2
-
-            return self.D
+            return self._derivative
         
         if len(self.tape) == 2:
 
-            E1 = self.tape[0]
-            E2 = self.tape[1]
+            L = self.tape[0]
+            R = self.tape[1]
 
-            tensors = (E1.derivative(), E2.tensor)
-            indices = ((-1, -2, -3, 1, 2, 3, -7, -8, -9), (1, 2, 3, -4, -5, -6))
-            D1 = ncon(tensors, indices)
+            tensors = [L.derivative(), R.array]
+            indices = [[-1, -2, -3, 1, 2, 3, -7, -8, -9], [1, 2, 3, -4, -5, -6]]
+            LRdL = ncon(tensors, indices)
 
-            tensors = (E1.tensor, E2.derivative())
-            indices = ((-1, -2, -3, 1, 2, 3), (1, 2, 3, -4, -5, -6, -7, -8, -9))
-            D2 = ncon(tensors, indices)
+            tensors = [L.array, R.derivative()]
+            indices = [[-1, -2, -3, 1, 2, 3], [1, 2, 3, -4, -5, -6, -7, -8, -9]]
+            LRdR = ncon(tensors, indices)
 
-            self.D = D1 + D2
+            self.D = LRdL + LRdR
 
             return self.D
         
-        return NotImplemented
+        raise NotImplementedError()
 
-    def __pow__(self, n: int):
+    def _compute_derivative(self) -> np.ndarray:
 
-        if n == 0:
-            d1, d2, p = self.d1, self.d2, self.p
-            return FirstOrderTrotterizedTransferMatrix(np.identity(d1*d2*p).reshape(d1, p, d2, d1, p, d2))
+        if self.A == None or self.B == None or self.U1 == None or self.U2 == None:
+            raise ValueError("Can only call _compute_derivative for non-composite transfer matrix object.")
+        
+        Ib = np.eye(self.Db)
+        tensors = [Ib, self.B.tensor.conj(), self.U2, self.U1, self.A.tensor, self.A.tensor]
+        indices = [[-3, -7], [-9, 1, -6], [-2, 2, -8, 1], [3, 4, 2, -5], [-1, 3, 5], [5, 4, -4]]
+        D1 = ncon(tensors, indices)
 
-        return super().__pow__(n)
+        tensors = [self.B.tensor.conj(), Ib, self.U2, self.U1, self.A.tensor, self.A.tensor]
+        indices = [[-3, 1, -7], [-9, -6], [-2, 2, 1, -8], [3, 4, 2, -5], [-1, 3, 5], [5, 4, -4]]
+        D2 = ncon(tensors, indices)
+
+        self.D = D1 + D2
+
+        return self.D
             
 class SecondOrderTrotterizedTransferMatrix(AbstractTransferMatrix):
 
-    A: UniformMps
-    B: UniformMps
-    U1: np.ndarray
-    U2: np.ndarray
-    _derivative: np.ndarray | None
+    _A: Optional[UniformMps]
+    _B: Optional[UniformMps]
+    _U1: Optional[np.ndarray]
+    _U2: Optional[np.ndarray]
 
-    def __init__(self, tensor: np.ndarray, tape: list[Self] = [], L: int = 1):
-        self.tensor = tensor
-        self.d1, self.d2, self.p = tensor.shape[0], tensor.shape[3], tensor.shape[1]
-        self.tape = tape
-        self._derivative = None
-        self.L = L
+    def __init__(self, array, *, tape: Sequence["SecondOrderTrotterizedTransferMatrix"] = None):
+        super().__init__(array, tape=tape)
+        self.Da, self.d, _, self.Db = array.shape[:self.n]
+        self._A, self._B, self._U1, self._U2 = None, None, None, None
+
+    @property
+    def A(self) -> Optional[UniformMps]:
+        return self._A
+
+    @property
+    def B(self) -> Optional[UniformMps]:
+        return self._B
+    
+    @property
+    def U1(self) -> Optional[np.ndarray]:
+        return self._U1
+
+    @property
+    def U2(self) -> Optional[np.ndarray]:
+        return self._U2
 
     @classmethod
     def new(cls, A: UniformMps, B: UniformMps, U1: np.ndarray, U2: np.ndarray):
-        tensors = [B.conj, B.conj, U1, U2, U1, A.tensor, A.tensor]
+
+        tensors = [B.tensor.conj(), B.tesnor.conj(), U1, U2, U1, A.tensor, A.tensor]
         indices = [[-4, 1, 2], [2, 3, -8], [-3, 4, 1, 3], [-2, 5, 4, -7], [6, 7, 5, -6], [-1, 6, 8], [8, 7, -5]]
-        res = ncon(tensors, indices)
-        E = SecondOrderTrotterizedTransferMatrix(res)
-        E.A = A
-        E.B = B
-        E.U1 = U1
-        E.U2 = U2
-        return E
+        E = ncon(tensors, indices)
+
+        obj = SecondOrderTrotterizedTransferMatrix(E)
+        obj.A, obj.B, obj.U1, obj.U2 = A, B, U1, U2
+        return obj
 
     def __matmul__(self, other):
         if isinstance(other, SecondOrderTrotterizedTransferMatrix):
             indices = [[-1, -2, -3, -4, 1, 2, 3, 4], [1, 2, 3, 4, -5, -6, -7, -8]]
-            tensor = ncon([self.tensor, other.tensor], indices, order=[1, 4, 2, 3])
-            return SecondOrderTrotterizedTransferMatrix(tensor, [self, other], L=self.L+other.L)
+            tensor = ncon([self.array, other.array], indices, order=[1, 4, 2, 3])
+            return SecondOrderTrotterizedTransferMatrix(tensor, [self, other])
             
-        return NotImplemented
-    
-    def __pow__(self, n: int):
-
-        if n == 0:
-            d1, d2, p = self.d1, self.d2, self.p
-            return FirstOrderTrotterizedTransferMatrix(np.identity(d1*d2*p).reshape(d1, p, d2, d1, p, d2))
-
-        return super().__pow__(n)
+        raise NotImplementedError()
 
     def _compute_derivative(self) -> None:
+
+        if self.A == None or self.B == None or self.U1 == None or self.U2 == None:
+            raise ValueError("Can only call _compute_derivative for non-composite transfer matrix object.")
         
         A, B, U1, U2 = self.A.tensor, self.B.tensor, self.U1, self.U2
-        d = self.d2
 
         tensors = [A, A, U1, U2, U1]
         indices = [[-1, 1, 2], [2, 3, -5], [1, 3, 4, -6], [-2, 4, 5, -7], [-3, 5, -4, -8]]
         order = [2, 1, 3, 4, 5]
         res = ncon(tensors, indices, order=order)
 
-        tensors = [np.eye(d), B.conj(), res]
+        tensors = [np.eye(self.Db), B.conj(), res]
         indices = [[-4, -9], [-11, 1, -8], [-1, -2, -3, -10, -5, -6, -7, 1]]
         deriv_1 = ncon(tensors, indices)
 
-        tensors = [B.conj(), res, np.eye(d)]
+        tensors = [B.conj(), res, np.eye(self.Db)]
         indices = [[-4, 1, -9], [-1, -2, -3, 1, -5, -6, -7, -10], [-11, -8]]
         deriv_2 = ncon(tensors, indices)
 
@@ -271,48 +390,30 @@ class SecondOrderTrotterizedTransferMatrix(AbstractTransferMatrix):
             return self._derivative
         
         if len(self.tape) == 2:
-            E1 = self.tape[0]
-            E2 = self.tape[1]
+            L = self.tape[0]
+            R = self.tape[1]
 
-            tensors = [E1.derivative(), E2.tensor]
+            tensors = [L.derivative(), R.array]
             indices = [
                 [-1, -2, -3, -4, 1, 2, 3, 4, -9, -10, -11], 
                 [1, 2, 3, 4, -5, -6, -7, -8]
             ]
             D1 = ncon(tensors, indices, order=[1, 4, 2, 3])
             
-            tensors = [E1.tensor, E2.derivative()]
+            tensors = [L.array, R.derivative()]
             indices = [
                 [-1, -2, -3, -4, 1, 2, 3, 4], 
-                [1, 2, 3, 4, -5, -6, -7, -8, -9, -10, -11]]
+                [1, 2, 3, 4, -5, -6, -7, -8, -9, -10, -11]
+            ]
             D2 = ncon(tensors, indices, order=[1, 4, 2, 3])
 
             self._derivative = D1 + D2
             return self._derivative
         
-        return NotImplemented
-    
-    def to_matrix(self):
-        d1, d2, p = self.d1, self.d2, self.p
-        return self.tensor.reshape((d1*d2*p**2, d1*d2*p**2))
-
-    def fidelity(self) -> np.complex128:
-        M = self.to_matrix()
-        r = eigs(M, k=5, which='LM', return_eigenvectors=False)
-        return r
-        
+        raise NotImplementedError()
 
 if __name__ == "__main__":
-
-    from qdmt.model import TransverseFieldIsing
-    TFIM = TransverseFieldIsing(.2, .05)
-    U1, U2 = TFIM.trotter_second_order()
-    A = UniformMps.new(2, 2)
-    E = SecondOrderTrotterizedTransferMatrix.new(A, A, U1, U2)
-    es = E.fidelity()
-
-    print(es**10)
-    print(np.abs(es))
-
-    T = E.__pow__(10)
-    T.derivative()
+    
+    A = UniformMps.random(4, 2)
+    E = TransferMatrix.new(A, A)
+    E.right_fixed_point()
