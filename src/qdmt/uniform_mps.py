@@ -2,6 +2,7 @@ from ncon import ncon
 import numpy as np
 from scipy.sparse.linalg import eigs
 from qdmt.isometry import Isometry
+from typing import Optional
 
 class UniformMps(Isometry):
 
@@ -24,19 +25,30 @@ class UniformMps(Isometry):
         
         V = np.ascontiguousarray(A.reshape(d * D, D, order="C"))
         super().__init__(V=V, tol=tol)
+
+        # cached property
+        self._tensor: Optional[np.ndarray] = None
         
         self.d = d
         self.D = D
 
     @property
     def tensor(self) -> np.ndarray:
-        d, D = self.d, self.D
-        order = "C" if self.V.flags.c_contiguous else ("F" if self.V.flags.f_contiguous else None)
-        if order is None:
-            self.V = np.ascontiguousarray(self.V)
-            order = "C"
-        A = self.V.reshape(D, d, D, order=order)
-        return A
+        if self._tensor is None:
+            d, D = self.d, self.D
+            order = "C" if self.V.flags.c_contiguous else ("F" if self.V.flags.f_contiguous else None)
+            
+            if order is None:
+                self.V = np.ascontiguousarray(self.V)
+                order = "C"
+            self._tensor = self.V.reshape(D, d, D, order=order)
+
+        return self._tensor
+    
+    def __setattr__(self, name, value):
+        if name == "V" and "_tensor" in self.__dict__:
+            object.__setattr__(self, "_tensor", None)
+        super().__setattr__(name, value)
     
     @classmethod
     def random(cls, D: int, d: int, *, seed: int | None = None, tol: float = 1e-10) -> "UniformMps":
@@ -73,10 +85,10 @@ if __name__ == "__main__":
 
     uMPS = UniformMps(A)
 
-    uMPS.A.conj()
+    uMPS.tensor.conj()
 
     print(psi)
 
     mps = UniformMps(A)
 
-    print(mps.check_left_orthonormal())
+    print(mps.is_isometry())
