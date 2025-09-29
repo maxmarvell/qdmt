@@ -52,7 +52,7 @@ def main():
     args = parse()
 
     num_files = len(args.filepath)
-    _, axs = plt.subplots(num_files, 1, figsize=(10, 4 * num_files), sharex=True)
+    _, axs = plt.subplots(num_files, 1, figsize=(10, 6), sharex=True)
 
     if num_files == 1:
         axs = [axs]
@@ -72,10 +72,9 @@ def main():
             A = UniformMps(data['state'][j])
             transverse_mag[j] = compute_transverse_magnetization(A)
 
-        # axs[i].plot(exact_times, exact, label='Exact')
+        axs[i].plot(exact_times, exact, label='Exact')
         axs[i].plot(data['time'], transverse_mag, label=f'Approximate - {filepath}')
-        axs[i].set_ylim(-.5, .5)
-        axs[i].set_ylabel(r'$\langle\sigma^z\rangle$')
+        axs[i].set_ylabel(r'$\langle\sigma^x\rangle$')
         axs[i].legend()
         axs[i].grid(True) # Add grid for better readability
 

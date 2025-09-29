@@ -64,7 +64,6 @@ def main():
     ax.set_xlabel("Parameter")
     ax.set_yscale("log")
     ax.set_ylabel("Mean time (s)")
-    ax.legend()
     plt.tight_layout()
 
     if args.output:
