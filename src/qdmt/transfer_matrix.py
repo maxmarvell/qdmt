@@ -37,24 +37,24 @@ class AbstractTransferMatrix(ABC):
 
     _derivative: Optional[np.ndarray]
 
-    def __init__(self, array: np.ndarray, *, tape: Sequence["AbstractTransferMatrix"] = None):
-        if not isinstance(array, np.ndarray):
+    def __init__(self, tensor: np.ndarray, *, tape: Sequence["AbstractTransferMatrix"] = None):
+        if not isinstance(tensor, np.ndarray):
             raise TypeError("E must be a numpy array.")
-        if len(array.shape) % 2 != 0:
+        if len(tensor.shape) % 2 != 0:
             raise ValueError("Balanced number of input and output legs required.")
         
-        n = len(array.shape) // 2
-        if array.shape[:n] != array.shape[-n:]:
+        n = len(tensor.shape) // 2
+        if tensor.shape[:n] != tensor.shape[-n:]:
             raise ValueError("Dimensions of input and output legs should be the same.")
         
-        self._array = array
+        self._tensor = tensor
         self._n = n
         self._derivative = None
         self.tape = list(tape) if tape is not None else []
 
     @property
-    def array(self) -> np.ndarray:
-        return self._array
+    def tensor(self) -> np.ndarray:
+        return self._tensor
     
     @property
     def n(self) -> int:
@@ -77,11 +77,11 @@ class AbstractTransferMatrix(ABC):
         pass
 
     def to_matrix(self) -> np.ndarray:
-        N = int(np.prod(self.array.shape[:self.n]))
-        return self.array.reshape((N, N))
+        N = int(np.prod(self.tensor.shape[:self.n]))
+        return self.tensor.reshape((N, N))
 
     def linop(self) -> LinearOperator:
-        return LinearOperator((self._n, self._n), matvec=self._matvec, dtype=self.array.dtype)
+        return LinearOperator((self._n, self._n), matvec=self._matvec, dtype=self.tensor.dtype)
     
     def __pow__(self, n: int) -> "AbstractTransferMatrix":
 
@@ -105,11 +105,11 @@ class AbstractTransferMatrix(ABC):
 
 class TransferMatrix(AbstractTransferMatrix):
 
-    def __init__(self, array: np.ndarray, *, tape: Sequence["TransferMatrix"] = None):
-        super().__init__(array, tape=tape)
+    def __init__(self, tensor: np.ndarray, *, tape: Sequence["TransferMatrix"] = None):
+        super().__init__(tensor, tape=tape)
 
         # dimensions
-        self.Da, self.Db = array.shape[:self.n]
+        self.Da, self.Db = tensor.shape[:self.n]
 
         self._A: Optional[np.ndarray] = None
         self._B: Optional[np.ndarray] = None
@@ -139,17 +139,17 @@ class TransferMatrix(AbstractTransferMatrix):
     def _matvec(self, v: np.ndarray):
         if self.A != None and self.B != None:
             return ncon([self.A, self.B.conj(), v], [[-1, 3, 1], [-2, 3, 2], [1, 2]])
-        return ncon([self.array, v], [[-1, -2, 1, 2], [1, 2]])
+        return ncon([self.tensor, v], [[-1, -2, 1, 2], [1, 2]])
     
     def _rmatvec(self, v):
         if self.A != None and self.B != None:
             return ncon([v, self.A, self.B.conj()], [[1, 2], [-1, 3, 2], [-2, 3, 1]])
-        return ncon([self.array, v], [[-1, -2, 1, 2], [1, 2]])
+        return ncon([self.tensor, v], [[-1, -2, 1, 2], [1, 2]])
 
     def __matmul__(self, other):
 
         if isinstance(other, TransferMatrix):
-            tensor = ncon((self.array, other.array), ((-1, -2, 1, 2), (1, 2, -3, -4)))
+            tensor = ncon((self.tensor, other.tensor), ((-1, -2, 1, 2), (1, 2, -3, -4)))
             return TransferMatrix(tensor, [self, other])
         
         if isinstance(other, np.ndarray):
@@ -180,7 +180,7 @@ class TransferMatrix(AbstractTransferMatrix):
             R = self.tape[1]
 
             indices = [[-1, -2, 1, 2, -5, -6, -7], [1, 2, -3, -4]]
-            LRdL = ncon([L.derivative(), R.array], indices)
+            LRdL = ncon([L.derivative(), R.tensor], indices)
 
             indices = [[-1, -2, 1, 2], [1, 2, -3, -4, -5, -6, -7]]
             LRdR = ncon([L.array, R.derivative()], indices)
@@ -191,7 +191,8 @@ class TransferMatrix(AbstractTransferMatrix):
         raise NotImplementedError
     
     def identity_like(self):
-        I = np.eye(self.n).reshape(*self.array.shape)
+        N = int(np.prod(self.tensor.shape[:self.n]))
+        I = np.eye(N).reshape(*self.tensor.shape)
         return TransferMatrix(I)
     
     def right_fixed_point(self):
@@ -259,6 +260,11 @@ class FirstOrderTrotterizedTransferMatrix(AbstractTransferMatrix):
             return FirstOrderTrotterizedTransferMatrix(tensor, [self, other])
 
         raise NotImplementedError()
+    
+    def identity_like(self) -> "FirstOrderTrotterizedTransferMatrix":
+        N = int(np.prod(self.tensor.shape[:self.n]))
+        I = np.eye(N).reshape(*self.tensor.shape)
+        return FirstOrderTrotterizedTransferMatrix(I)
     
     def derivative(self):
 
@@ -346,6 +352,11 @@ class SecondOrderTrotterizedTransferMatrix(AbstractTransferMatrix):
         obj = SecondOrderTrotterizedTransferMatrix(E)
         obj.A, obj.B, obj.U1, obj.U2 = A.tensor, B.tensor, U1, U2
         return obj
+    
+    def identity_like(self) -> "SecondOrderTrotterizedTransferMatrix":
+        N = int(np.prod(self.tensor.shape[:self.n]))
+        I = np.eye(N).reshape(*self.tensor.shape)
+        return SecondOrderTrotterizedTransferMatrix(I)
 
     def __matmul__(self, other):
         if isinstance(other, SecondOrderTrotterizedTransferMatrix):
