@@ -22,7 +22,10 @@ def evolve(A0: UniformMps,
            trotterization_order: int = 2):
 
     d = A0.p
-    A = UniformMps.new(D, d)
+    if A0.d == D:
+        A = A0
+    else:
+        A = UniformMps.new(D, d)
 
     times = np.arange(start_t + delta_t, max_t + delta_t/2, delta_t)
     cost = np.empty_like(times)
