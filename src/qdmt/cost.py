@@ -6,23 +6,17 @@ from qdmt.uniform_mps import UniformMps
 from qdmt.transfer_matrix import (
     FirstOrderTrotterizedTransferMatrix as FirstOrder,
     SecondOrderTrotterizedTransferMatrix as SecondOrder,
-    TransferMatrix
+    TransferMatrix,
+    RightFixedPoint
 )
 from typing import Self
 from qdmt.model import AbstractModel
 from qdmt.utils_n.mps import trotter_step
-from qdmt.fixed_point import RightFixedPoint
 import copy
 
 import opt_einsum as oe
 
 class AbstractCostFunction(ABC):
-
-    def __init__(self, A: UniformMps, L: int):
-        self.L = L
-        self.A = A
-        AAdag = TransferMatrix.new(self.A, self.A)
-        self.rA = RightFixedPoint(AAdag)
 
     @abstractmethod
     def cost(self, B: UniformMps, rB: RightFixedPoint) -> np.float64:
@@ -35,48 +29,42 @@ class AbstractCostFunction(ABC):
     def copy(self) -> 'AbstractCostFunction':
         new_f = copy.copy(self)
         return new_f
-    
-    def fg(self, B: UniformMps):
-        n, p = B.matrix.shape
-        C = self.cost(B)
-        D = self.derivative(B)
-        return np.abs(C), D.reshape(n, p)
 
 class HilbertSchmidt(AbstractCostFunction):
 
     def __init__(self, A, L):
-        super().__init__(A, L)
+        self.L = L
+        self.A = A
+        AAdag = TransferMatrix.new(self.A, self.A)
+        self.rA = AAdag.right_fixed_point()
 
         # compute and store the cost of rho(A)^2
         AAdag = TransferMatrix.new(self.A, self.A)
         T_AA = AAdag.__pow__(L).tensor
-        self.costAA  = ncon((T_AA, T_AA, self.rA.tensor, self.rA.tensor), ((1, 2, 3, 4), (2, 1, 5, 6), (5, 4), (3, 6)))
-
-        self.normA = ncon((T_AA, self.rA.tensor), ((1, 1, 3, 2), (3, 2)))
+        self.costAA  = ncon([T_AA, T_AA, self.rA.tensor, self.rA.tensor], [[1, 2, 3, 4], [2, 1, 5, 6], [5, 4], [3, 6]])
 
 
     def cost(self:Self, B: UniformMps, rB: RightFixedPoint) -> np.float64:
 
         BBdag = TransferMatrix.new(B, B)
+        rB = BBdag.right_fixed_point()
 
-        self.A.correlation_length()
-
-        L = self.L
-        res = 0
+        # init cost result to zero
+        res = 0 + 0j
 
         # rho(B)^2 contribution
-        T_BB = BBdag.__pow__(L).tensor
-        res += ncon((T_BB, T_BB, rB.tensor, rB.tensor), ((1, 2, 3, 4), (2, 1, 5, 6), (5, 4), (3, 6)))
+        T_BB = BBdag.__pow__(self.L).tensor
+        res += ncon([T_BB, T_BB, rB.tensor, rB.tensor], [[1, 2, 3, 4], [2, 1, 5, 6], [5, 4], [3, 6]])
 
         # rho(A)^2 contribution
         res += self.costAA
 
         # 2*rho(A)*rho(B) contribution
-        res -= 2 * self._compute_rho_A_rho_B(B, rB)
+        res -= 2 * self._compute_rhoArhoB(B, rB)
 
         return np.abs(res)
 
-    def _compute_rho_A_rho_B(self, B: UniformMps, rB: RightFixedPoint):
+    def _compute_rhoArhoB(self, B: UniformMps, rB: RightFixedPoint) -> np.complex128:
 
         ABdag = TransferMatrix.new(self.A, B)
         BAdag = TransferMatrix.new(B, self.A)
@@ -84,39 +72,57 @@ class HilbertSchmidt(AbstractCostFunction):
         T_AB = ABdag.__pow__(self.L).tensor
         T_BA = BAdag.__pow__(self.L).tensor
 
-        return abs(ncon((T_AB, T_BA, rB.tensor, self.rA.tensor), ((1, 2, 3, 4), (2, 1, 5, 6), (5, 4), (3, 6))))
+        return ncon((T_AB, T_BA, rB.tensor, self.rA.tensor), ((1, 2, 3, 4), (2, 1, 5, 6), (5, 4), (3, 6)))
     
-    def derivative(self, B: UniformMps, rB: RightFixedPoint):
+    def derivative(self, B: UniformMps, rB: RightFixedPoint) -> np.ndarray:
 
-        ABdag = TransferMatrix.new(self.A, B)
-        BAdag = TransferMatrix.new(B, self.A)
-        BBdag = TransferMatrix.new(B, B)
+        res = np.zeros_like(B.tensor, dtype=np.complex128)
+        res += 2 * self._compute_drhoBrhoB_dB(B, rB)
+        res -= 2 * self._compute_drhoArhoB_dB(B, rB)
 
-        L = self.L
+        return res
+    
+    def _compute_drhoArhoB_dB(self, B: UniformMps, rB: RightFixedPoint) -> np.ndarray:
+
+        # empty result
         res = np.zeros_like(B.tensor, dtype=np.complex128)
 
+        # compute mixed transfer matrices
+        ABdag = TransferMatrix.new(self.A, B)
+        BAdag = TransferMatrix.new(B, self.A)
+
+        # 2rho(A)rho(B) contribution
+        T_AB = ABdag.__pow__(self.L)
+        T_BA = BAdag.__pow__(self.L)
+        D = T_AB.derivative()
+        res += ncon([D, T_BA.tensor, rB.tensor, self.rA.tensor], [[1, 2, 3, 4, -1, -2, -3], [2, 1, 5, 6], [5, 4], [3, 6]])
+
+        # right fixed point
+        tensors = [T_AB.tensor, T_BA.tensor, self.rA.tensor]
+        indices = [[1, 2, 3, -1], [2, 1, -2, 4], [3, 4]]
+        v = ncon(tensors, indices)
+        res += rB.derivative(v)
+
+        return res
+    
+    def _compute_drhoBrhoB_dB(self, B: UniformMps, rB: RightFixedPoint) -> np.ndarray:
+
+        # empty result
+        res = np.zeros_like(B.tensor, dtype=np.complex128)
+
+        # compute transfer matrix
+        BBdag = TransferMatrix.new(B, B)
+
         # rho(B)^2 contribution
-        T_BB = BBdag.__pow__(L)
+        T_BB = BBdag.__pow__(self.L)
         D = T_BB.derivative()
-        res += 2 * ncon((D, T_BB.tensor, rB.tensor, rB.tensor), ((1, 2, 3, 4, -1, -2, -3), (2, 1, 5, 6), (5, 4), (3, 6)))
+        res += ncon((D, T_BB.tensor, rB.tensor, rB.tensor), ((1, 2, 3, 4, -1, -2, -3), (2, 1, 5, 6), (5, 4), (3, 6)))
 
         # right fixed point
         tensors = (T_BB.tensor, T_BB.tensor, rB.tensor)
         indices = ((1, 2, 3, -1), (2, 1, -2, 4), (3, 4))
         v = ncon(tensors, indices)
-        res += 2 * rB.derivative(v)
-
-        # 2rho(A)rho(B) contribution
-        T_AB = ABdag.__pow__(L)
-        T_BA = BAdag.__pow__(L)
-        D = T_AB.derivative()
-        res -= 2 * ncon((D, T_BA.tensor, rB.tensor, self.rA.tensor), ((1, 2, 3, 4, -1, -2, -3), (2, 1, 5, 6), (5, 4), (3, 6)))
-
-        # right fixed point
-        tensors = (T_AB.tensor, T_BA.tensor, self.rA.tensor)
-        indices = ((1, 2, 3, -1), (2, 1, -2, 4), (3, 4))
-        v = ncon(tensors, indices)
-        res -= 2 * rB.derivative(v)
+        res += rB.derivative(v)
 
         return res
 
@@ -124,7 +130,10 @@ class EvolvedHilbertSchmidt(AbstractCostFunction):
 
     def __init__(self, A: UniformMps, model: AbstractModel, L: int, trotterization_order: int = 2):
 
-        super().__init__(A, L)
+        self.L = L
+        self.A = A
+        AAdag = TransferMatrix.new(self.A, self.A)
+        self.rA = AAdag.right_fixed_point()
 
         self.trotterization_order = trotterization_order
 
