@@ -32,7 +32,7 @@ class AbstractCostFunction(ABC):
 
 class HilbertSchmidt(AbstractCostFunction):
 
-    def __init__(self, A, L):
+    def __init__(self, A, L, *, backend: str = "CPU"):
         self.L = L
         self.A = A
         AAdag = TransferMatrix.new(self.A, self.A)
@@ -222,7 +222,7 @@ class EvolvedHilbertSchmidt(AbstractCostFunction):
             T_AA = AAdag.__pow__(L-2).tensor
 
         else:
-            tmp = A.mps_chain(4)
+            tmp = A.to_mps_chain(4)
             tensors = [tmp, U1, U1, U2]
             indices = [[-1, 1, 2, 3, 4, -6], [1, 2, -2, 5], [3, 4, 6, -5], [5, 6, -3, -4]]
             tmp = ncon(tensors, indices)
@@ -260,8 +260,8 @@ class EvolvedHilbertSchmidt(AbstractCostFunction):
             indices = [[1, 2, -1, -3], [-2, 1, 3], [3, 2, -4]]
             return ncon(tensors, indices)
 
-        tmp1 = A.mps_chain(2)
-        tmp2 = A.mps_chain(4)
+        tmp1 = A.to_mps_chain(2)
+        tmp2 = A.to_mps_chain(4)
 
         tensors = [tmp1, U1]
         indices = [[-1, 1, 2, -4], [1, 2, -2, -3]]
@@ -283,7 +283,7 @@ class EvolvedHilbertSchmidt(AbstractCostFunction):
 
             N = L + 4
 
-            mps = A.mps_chain(N)
+            mps = A.to_mps_chain(N)
 
             # trotterized evolve
             mps = trotter_step(mps, U1)
@@ -310,7 +310,7 @@ class EvolvedHilbertSchmidt(AbstractCostFunction):
         else: 
 
             # create a base mps to calculate the left and right mixing
-            mps = A.mps_chain(4)
+            mps = A.to_mps_chain(4)
             mps = trotter_step(mps, U1)
             mps = trotter_step(mps, U2, start=1)
 
@@ -340,7 +340,7 @@ class EvolvedHilbertSchmidt(AbstractCostFunction):
 
         A, U1, U2, rA = self.A, self.U1, self.U2, self.rA
 
-        mps = A.mps_chain(4)
+        mps = A.to_mps_chain(4)
         mps = trotter_step(mps, U1)
         mps = trotter_step(mps, U2, start=1)
 
@@ -582,7 +582,7 @@ class EvolvedHilbertSchmidt(AbstractCostFunction):
         elif L % 2 == 0 and self.trotterization_order == 2:
             N = L + 4
 
-        mps = A.mps_chain(N)
+        mps = A.to_mps_chain(N)
 
         # first trotter step
         mps = trotter_step(mps, U1)
@@ -616,7 +616,7 @@ class EvolvedHilbertSchmidt(AbstractCostFunction):
     def _compute_rhoB(self, B: UniformMps, rB: RightFixedPoint) -> npt.NDArray[np.complex128]:
 
         L = self.L
-        chain = B.mps_chain(self.L)
+        chain = B.to_mps_chain(self.L)
 
         tensors = (chain, chain.conj(), rB.tensor)
         indices = [
@@ -631,8 +631,8 @@ class EvolvedHilbertSchmidt(AbstractCostFunction):
     def compute_drhoB(self, i: int, B: UniformMps, rB: RightFixedPoint) -> npt.NDArray[np.complex128]:
 
         L = self.L
-        chain = B.mps_chain(self.L)
-        sub_chains = [B.mps_chain(i).conj(), B.mps_chain(L-i-1).conj()]
+        chain = B.to_mps_chain(self.L)
+        sub_chains = [B.to_mps_chain(i).conj(), B.to_mps_chain(L-i-1).conj()]
 
         tensors = [chain, *sub_chains, np.eye(B.p), rB.tensor]
         indices = [
@@ -649,7 +649,7 @@ class EvolvedHilbertSchmidt(AbstractCostFunction):
     def compute_drhoBrhoAdrB(self, B: UniformMps) -> npt.NDArray[np.complex128]:
 
         rhoA, L = self.rhoA, self.L
-        chain = B.mps_chain(self.L)
+        chain = B.to_mps_chain(self.L)
 
         tensors = (chain, chain.conj())
         indices = [
@@ -670,7 +670,9 @@ class EvolvedHilbertSchmidt(AbstractCostFunction):
 class NaiveEvolvedHilbertSchmidt(AbstractCostFunction):
     def __init__(self, A: UniformMps, model: AbstractModel, L: int, trotterization_order: int = 2, GPU: bool = False):
 
-        super().__init__(A, L)
+        self.A, self.L = A, L
+        AAdag = TransferMatrix.new(A, A)
+        self.rA = AAdag.right_fixed_point()
 
         self.trotterization_order = trotterization_order
         self.GPU = GPU
@@ -697,7 +699,7 @@ class NaiveEvolvedHilbertSchmidt(AbstractCostFunction):
         elif L % 2 == 0 and self.trotterization_order == 2:
             N = L + 4
 
-        mps = A.mps_chain(N)
+        mps = A.to_mps_chain(N)
 
         # first trotter step
         mps = trotter_step(mps, U1)
@@ -731,7 +733,7 @@ class NaiveEvolvedHilbertSchmidt(AbstractCostFunction):
     def compute_rhoB(self, B: UniformMps, rB: RightFixedPoint) -> npt.NDArray[np.complex128]:
 
         L = self.L
-        chain = B.mps_chain(self.L)
+        chain = B.to_mps_chain(self.L)
 
         # compute drhoBdrB
         tensors = (chain, chain.conj(), rB.tensor)
@@ -797,10 +799,10 @@ class NaiveEvolvedHilbertSchmidt(AbstractCostFunction):
     def compute_drhoB(self, i: int, B: UniformMps, rB: RightFixedPoint) -> npt.NDArray[np.complex128]:
 
         L = self.L
-        chain = B.mps_chain(self.L)
-        sub_chains = [B.mps_chain(i).conj(), B.mps_chain(L-i-1).conj()]
+        chain = B.to_mps_chain(self.L)
+        sub_chains = [B.to_mps_chain(i).conj(), B.to_mps_chain(L-i-1).conj()]
 
-        tensors = [chain, *sub_chains, np.eye(B.p), rB.tensor]
+        tensors = [chain, *sub_chains, np.eye(B.d), rB.tensor]
         indices = [
             [1] + [-i for i in range(1, L+1)] + [2],
             [1] + [-i for i in range(L+1, L+1+i)] + [-2*L-1],
@@ -815,7 +817,7 @@ class NaiveEvolvedHilbertSchmidt(AbstractCostFunction):
     def compute_drhoBrhoBdrB(self, rhoB: np.ndarray, B: UniformMps) -> npt.NDArray[np.complex128]:
 
         L = self.L
-        chain = B.mps_chain(L)
+        chain = B.to_mps_chain(L)
 
         tensors = (chain, chain.conj())
         indices = [
@@ -836,7 +838,7 @@ class NaiveEvolvedHilbertSchmidt(AbstractCostFunction):
     def compute_drhoBrhoAdrB(self, B: UniformMps) -> npt.NDArray[np.complex128]:
 
         rhoA, L = self.rhoA, self.L
-        chain = B.mps_chain(self.L)
+        chain = B.to_mps_chain(self.L)
 
         tensors = (chain, chain.conj())
         indices = [

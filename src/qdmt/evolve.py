@@ -21,11 +21,11 @@ def evolve(A0: UniformMps,
            start_t: float = 0.0,
            trotterization_order: int = 2):
 
-    d = A0.p
-    if A0.d == D:
+    d = A0.d
+    if A0.D == D:
         A = A0
     else:
-        A = UniformMps.new(D, d)
+        A = UniformMps.random(D, d)
 
     times = np.arange(start_t + delta_t, max_t + delta_t/2, delta_t)
     cost = np.empty_like(times)
@@ -235,8 +235,8 @@ if __name__ == "__main__":
     filepath = 'data/non_integrable/bond_dimension_8_patch_4_Y'
     assert check_write_permission(filepath)
 
-    model = TransverseFieldIsing(g=1.05, delta_t=0.1, h=-0.5, J=-1)
-    times, state, cost, norm = evolve(A, 8, 4, model, 0.1, 10, 1000, 1e-8)
+    model = TransverseFieldIsing(g=1.05, delta_t=0.01, h=-0.5, J=-1)
+    times, state, cost, norm = evolve(A, 8, 4, model, 0.01, 10, 1000, 1e-8)
 
     np.savez_compressed(filepath,
                         time=times,

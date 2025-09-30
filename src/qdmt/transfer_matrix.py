@@ -427,3 +427,36 @@ if __name__ == "__main__":
     A = UniformMps.random(4, 2)
     E = TransferMatrix.new(A, A)
     E.right_fixed_point()
+
+    M = E.to_matrix()
+    MM = np.kron(M, M.conj())
+    print(MM.shape)
+
+
+    from scipy.linalg import svd
+    U, S, Vt = svd(M)
+    print(np.allclose(Vt@U, np.eye(4**2)))
+
+
+    def count_near_zero(M, tol=1e-12):
+        return np.sum(np.abs(M) < tol)
+    
+    print(f"# of values near zero in M {count_near_zero(M, 1e-9)}")
+    print(f"# of values near zero in MM {count_near_zero(MM, 1e-9)}")
+
+    I = np.eye(4**2).reshape(-1)
+    print(f"# of values near zero in I {count_near_zero(I)}")
+
+    IMM = I.T @ MM
+    print(f"# of values near zero in I.T @ MM {count_near_zero(IMM, 1e-9)}")
+
+
+
+
+    print(count_near_zero(I))
+
+
+
+    # I_MM = 
+    print(I.shape)
+

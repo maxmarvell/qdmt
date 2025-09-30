@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from qdmt.manifold import AbstractManifold, euclidian_metric
 from qdmt.cost import AbstractCostFunction
 from qdmt.uniform_mps import UniformMps
-from qdmt.fixed_point import RightFixedPoint
+from qdmt.transfer_matrix import TransferMatrix
 
 @dataclass
 class LineSearchPoint:
@@ -137,7 +137,7 @@ def linesearch(
 
         # compute cost and gradient at new point
         B = UniformMps(W_prime)
-        rB = RightFixedPoint.from_mps(B)
+        rB = TransferMatrix.new(B, B).right_fixed_point()
         C_prime, G_prime = fg(B, rB)
 
         # compute slope at new point 

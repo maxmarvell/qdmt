@@ -72,6 +72,15 @@ class UniformMps(Isometry):
     
     def norm(self) -> np.float64:
         return self.fidelity(self)
+    
+    def to_mps_chain(self, L: int) -> np.ndarray:
+        if L == 0:
+            return np.eye(self.D)
+        if L == 1:
+            return self.tensor
+        tensors = [self.tensor for _ in range(L)]
+        indices = [[-i, -(i+1), i] if i == 1 else [i-1, -(i+1), -(i+2)] if i == L else [i-1, -(i+1), i] for i in range(1, L+1)]
+        return ncon(tensors, indices)
  
 if __name__ == "__main__":
     theta = phi = np.pi / 2

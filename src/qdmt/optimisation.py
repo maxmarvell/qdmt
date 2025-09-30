@@ -6,7 +6,7 @@ from qdmt.manifold import AbstractManifold, euclidian_metric as inner
 from qdmt.cost import AbstractCostFunction
 from qdmt.uniform_mps import UniformMps
 from qdmt.linesearch import linesearch
-from qdmt.fixed_point import RightFixedPoint
+from qdmt.transfer_matrix import RightFixedPoint, TransferMatrix
 
 def preconditioning(G: np.ndarray, r: np.ndarray) -> np.ndarray:
     """
@@ -31,10 +31,9 @@ class AbstractOptimizer(ABC):
         self.M = M
 
     def fg(self, B: UniformMps, rB: RightFixedPoint):
-        n, p = B.matrix.shape
         C = self.f.cost(B, rB)
-        D = self.f.derivative(B, rB).reshape(n, p)
-        return C, self.M.project(B.matrix, D)
+        D = self.f.derivative(B, rB).reshape(B.m, B.n)
+        return C, self.M.project(B.V, D)
 
     @abstractmethod
     def optimize(self) -> tuple[UniformMps, np.float64, np.float64]:
@@ -159,7 +158,7 @@ class ConjugateGradient(AbstractOptimizer):
     def __init__(self, f: AbstractCostFunction, M: AbstractManifold, B0: UniformMps, max_iter: int, tol: float = 1e-8, restart: int = 100,  precondition: bool = True, verbose: bool = False,):
         super().__init__(f, M)
         self.B0 = B0
-        self.rB0 = RightFixedPoint.from_mps(B0)
+        self.rB0 = TransferMatrix.new(B0, B0).right_fixed_point()
         self.precondtion = precondition
         self.restart = restart
         self.max_iter = max_iter
@@ -189,8 +188,8 @@ class ConjugateGradient(AbstractOptimizer):
 
     def optimize(self):
 
-        W = self.B0.matrix
-        rB = RightFixedPoint.from_mps(self.B0)
+        W = self.B0.V
+        rB = TransferMatrix.new(self.B0, self.B0).right_fixed_point()
         C, G = self.fg(self.B0, rB)
         cost_history = [C]
 
@@ -237,17 +236,17 @@ class ConjugateGradient(AbstractOptimizer):
                 alpha = min(alpha, 0.1)
                 W, _ = self.M.retract(W, X, alpha)
                 B = UniformMps(W)
-                rB = RightFixedPoint.from_mps(B)
+                rB = TransferMatrix.new(B, B).right_fixed_point()
                 C, G = self.fg(B, rB)
             else:
                 alpha = min(alpha*1.1, 1)
                 B = UniformMps(W)
-                rB = RightFixedPoint.from_mps(B)
+                rB = TransferMatrix.new(B, B).right_fixed_point()
 
-            if not B.check_left_orthonormal():
+            if not B.is_isometry():
                 print("Warning: Not left orthonormal left orthonormalizing!")
-                B.left_orthorganlize()
-                W = B.matrix
+                B = B.orthonormalize()
+                W = B.V
 
             iter += 1
 
