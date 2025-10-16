@@ -4,7 +4,7 @@ from scipy.integrate import quad
 
 from qdmt.uniform_mps import UniformMps
 from qdmt.model import Pauli
-from qdmt.fixed_point import RightFixedPoint
+from qdmt.transfer_matrix import RightFixedPoint
 
 def transverse_magnetization(A: UniformMps) -> np.float64:
     r = RightFixedPoint.from_mps(A)

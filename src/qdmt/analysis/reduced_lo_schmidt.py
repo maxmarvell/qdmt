@@ -2,9 +2,9 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 from qdmt.uniform_mps import UniformMps
-from qdmt.fixed_point import RightFixedPoint
+from qdmt.transfer_matrix import RightFixedPoint
 from qdmt.cost import HilbertSchmidt
-from analysis.lo_schmidt_echo import compute_lo_schmidt, loschmidt_paper
+from qdmt.analysis.lo_schmidt_echo import compute_lo_schmidt, loschmidt_paper
 
 def compute_reduced_lo_schmidt(A: UniformMps, B: UniformMps, L: int) -> np.float64:
     f = HilbertSchmidt(A, B, L)

@@ -3,7 +3,7 @@ from ncon import ncon
 from qdmt.uniform_mps import UniformMps
 from qdmt.cost import HilbertSchmidt
 from qdmt.transfer_matrix import TransferMatrix
-from qdmt.fixed_point import RightFixedPoint
+from qdmt.transfer_matrix import RightFixedPoint
 
 def compute_second_Reyni(A: UniformMps, L: int):
     C = HilbertSchmidt(A, L)

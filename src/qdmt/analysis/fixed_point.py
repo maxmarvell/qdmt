@@ -3,9 +3,9 @@ import matplotlib.pyplot as plt
 
 from qdmt.uniform_mps import UniformMps
 from qdmt.cost import HilbertSchmidt
-from qdmt.fixed_point import RightFixedPoint
-from analysis.lo_schmidt_echo import compute_lo_schmidt
-from analysis.utils.graph import *
+from qdmt.transfer_matrix import RightFixedPoint
+from qdmt.analysis.lo_schmidt_echo import compute_lo_schmidt
+from qdmt.analysis.utils.graph import *
 
 def compute_trace_distace(A1, A2, L):
     f = HilbertSchmidt(A1, L)

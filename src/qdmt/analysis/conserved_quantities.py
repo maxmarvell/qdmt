@@ -2,7 +2,7 @@ import numpy as np
 from ncon import ncon
 
 from qdmt.uniform_mps import UniformMps
-from qdmt.fixed_point import RightFixedPoint
+from qdmt.transfer_matrix import RightFixedPoint
 from qdmt.model import AbstractModel
 
 def compute_energy(A: UniformMps, model: AbstractModel) -> np.float64:

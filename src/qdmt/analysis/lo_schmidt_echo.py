@@ -7,7 +7,7 @@ from .utils.graph import *
 from qdmt.uniform_mps import UniformMps
 from qdmt.transfer_matrix import TransferMatrix
 from qdmt.cost import HilbertSchmidt
-from qdmt.fixed_point import RightFixedPoint
+from qdmt.transfer_matrix import RightFixedPoint
 
 def compute_lo_schmidt(A: UniformMps, A0: UniformMps) -> np.float64:
     E = TransferMatrix.new(A, A0)

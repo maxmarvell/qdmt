@@ -2,7 +2,7 @@ import pytest
 from qdmt.uniform_mps import UniformMps
 from qdmt.cost import EvolvedHilbertSchmidt
 from qdmt.model import TransverseFieldIsing
-from qdmt.fixed_point import RightFixedPoint
+from qdmt.transfer_matrix import RightFixedPoint
 from helpers.cost import EvolvedHilbertSchmidt
 
 FIXED_L = 10

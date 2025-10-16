@@ -1,0 +1,20 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+type: software
+title: "QDMT: Quantum Density Matrix Truncation"
+abstract: "A Python package for efficient quantum time evolution using Matrix Product State (MPS) representations with density matrix truncation methods."
+authors:
+  - family-names: "Contributors"
+    given-names: "QDMT"
+repository-code: "https://github.com/yourusername/qdmt"
+url: "https://github.com/yourusername/qdmt"
+license: MIT
+version: 0.1.0
+date-released: 2024-10-13
+keywords:
+  - quantum physics
+  - tensor networks
+  - matrix product states
+  - time evolution
+  - quantum many-body systems
+  - python

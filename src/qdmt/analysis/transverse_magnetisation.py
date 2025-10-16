@@ -5,7 +5,7 @@ import argparse
 from scipy.integrate import quad
 
 from qdmt.transfer_matrix import TransferMatrix
-from qdmt.fixed_point import RightFixedPoint
+from qdmt.transfer_matrix import RightFixedPoint
 from qdmt.uniform_mps import UniformMps
 from qdmt.model import Pauli
 

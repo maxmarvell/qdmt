@@ -76,6 +76,10 @@ class AbstractTransferMatrix(ABC):
     def _matvec(self, other) -> "AbstractTransferMatrix":
         pass
 
+    @abstractmethod
+    def _rmatvec(self, other) -> "AbstractTransferMatrix":
+        pass
+
     def to_matrix(self) -> np.ndarray:
         N = int(np.prod(self.tensor.shape[:self.n]))
         return self.tensor.reshape((N, N))
@@ -150,7 +154,7 @@ class TransferMatrix(AbstractTransferMatrix):
 
         if isinstance(other, TransferMatrix):
             tensor = ncon((self.tensor, other.tensor), ((-1, -2, 1, 2), (1, 2, -3, -4)))
-            return TransferMatrix(tensor, [self, other])
+            return TransferMatrix(tensor, tape=[self, other])
         
         if isinstance(other, np.ndarray):
             if other.ndim == 2:
@@ -350,7 +354,7 @@ class SecondOrderTrotterizedTransferMatrix(AbstractTransferMatrix):
         E = ncon(tensors, indices)
 
         obj = SecondOrderTrotterizedTransferMatrix(E)
-        obj.A, obj.B, obj.U1, obj.U2 = A.tensor, B.tensor, U1, U2
+        obj._A, obj._B, obj._U1, obj._U2 = A, B, U1, U2
         return obj
     
     def identity_like(self) -> "SecondOrderTrotterizedTransferMatrix":
@@ -365,6 +369,25 @@ class SecondOrderTrotterizedTransferMatrix(AbstractTransferMatrix):
             return SecondOrderTrotterizedTransferMatrix(tensor, [self, other])
             
         raise NotImplementedError()
+    
+    def _matvec(self, v: np.ndarray) -> np.ndarray:
+        AA = np.einsum('fgh,aef->ghae', self.A.tensor, self.A.tensor)
+        BB = np.einsum('onp,dmo->npdm', self.B.tensor.conj(), self.B.tensor.conj())
+        AAU1 = np.einsum('ghae,egij->haij', AA, self.U1)
+        BBU1 = np.einsum('npdm,ckmn->pdck', BB, self.U1)
+
+        return 
+    
+    def _rmatvec(self, v: np.ndarray) -> np.ndarray:
+        AA = np.einsum('fgh,aef->ghae', self.A.tensor, self.A.tensor)
+        AAU1 = np.einsum('ghae,egij->haij', AA, self.U1)
+        BB = np.einsum('onp,dmo->npdm', self.B.tensor.conj(), self.B.tensor.conj())
+        BBU1 = np.einsum('npdm,ckmn->pdck', BB, self.U1)
+        vAAU1 = np.einsum('pdck,abcd->pkab', BBU1, v)
+        vAAU1U2 = np.einsum('pkab,bikl->pail', vAAU1, self.U2)
+        return np.einsum('pail,haij->hjlp', vAAU1U2, AAU1)
+    
+
 
     def _compute_derivative(self) -> None:
 
@@ -424,39 +447,4 @@ class SecondOrderTrotterizedTransferMatrix(AbstractTransferMatrix):
 
 if __name__ == "__main__":
     
-    A = UniformMps.random(4, 2)
-    E = TransferMatrix.new(A, A)
-    E.right_fixed_point()
-
-    M = E.to_matrix()
-    MM = np.kron(M, M.conj())
-    print(MM.shape)
-
-
-    from scipy.linalg import svd
-    U, S, Vt = svd(M)
-    print(np.allclose(Vt@U, np.eye(4**2)))
-
-
-    def count_near_zero(M, tol=1e-12):
-        return np.sum(np.abs(M) < tol)
-    
-    print(f"# of values near zero in M {count_near_zero(M, 1e-9)}")
-    print(f"# of values near zero in MM {count_near_zero(MM, 1e-9)}")
-
-    I = np.eye(4**2).reshape(-1)
-    print(f"# of values near zero in I {count_near_zero(I)}")
-
-    IMM = I.T @ MM
-    print(f"# of values near zero in I.T @ MM {count_near_zero(IMM, 1e-9)}")
-
-
-
-
-    print(count_near_zero(I))
-
-
-
-    # I_MM = 
-    print(I.shape)
-
+   pass

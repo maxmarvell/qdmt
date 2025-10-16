@@ -77,14 +77,15 @@ class TransverseFieldIsing(AbstractModel):
         self.h = h
         self.H = (self.J*self.ZZ+self.g*self.XI+self.h*self.ZI).reshape(2, 2, 2, 2)
 
-    def _compute_U_half_dt(self) -> None:
+    def _compute_U_half_dt(self) -> np.ndarray:
         H = self.H.reshape(4, 4)
         self.U_half_dt = expm(-1j*self.delta_t*H).reshape(2, 2, 2, 2)
+        return self.U_half_dt
     
-    def _compute_U_quarter_dt(self) -> None:
+    def _compute_U_quarter_dt(self) -> np.ndarray:
         H = self.H.reshape(4, 4)
         self.U_quarter_dt = expm(-.5j*self.delta_t*H).reshape(2, 2, 2, 2)
-
+        return self.U_quarter_dt
 
 class HeisenbergXXZ(AbstractModel):
 

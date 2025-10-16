@@ -11,7 +11,7 @@ from qdmt.transfer_matrix import (
 )
 from typing import Self
 from qdmt.model import AbstractModel
-from qdmt.utils_n.mps import trotter_step
+from qdmt.utils.mps import trotter_step
 import copy
 
 import opt_einsum as oe
