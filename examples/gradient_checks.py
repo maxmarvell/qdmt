@@ -5,6 +5,8 @@ from scipy.stats import unitary_group
 from scipy.linalg import expm
 import matplotlib.pyplot as plt
 
+from datetime import datetime
+
 
 from examples.data_management import save_results, load_results
 
@@ -246,6 +248,12 @@ def plot_stats(stats):
     plt.show()
 
 
+
+
+def done():
+    print("Done at:", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+
+
 it = 1000
 tol = 1e-10
 d = 2
@@ -253,8 +261,9 @@ d = 2
 
 L=2
 D_target=10
-Drange=np.arange(2, 3)
+Drange=np.arange(2, 5)
 C_as_function_of_D(d,D_target,Drange,L,it,tol,1,True)
+done()
 testres=load_results("representability",f"D_target={D_target} L={L}")
 stats_results(testres)
 
