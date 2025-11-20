@@ -450,6 +450,8 @@ if __name__ == "__main__":
     #     print(D)
     #     generate_trimmed_and_unfolded(0.01,100000,1e-10,1000,D,50403,True)
 
+    # sys.exit()    
+
     long_8=load_unfolded_data(0.01,100000,1e-10,1000,8,50403)
     long_12=load_unfolded_data(0.01,100000,1e-10,1000,12,50403)
     long_16=load_unfolded_data(0.01,100000,1e-10,1000,16,50403)

@@ -1,9 +1,12 @@
 from src.qdmt.evolve import *
 from concurrent.futures import ThreadPoolExecutor, TimeoutError
-from examples.analyze_first import load_data, count_initial_nonzero, spit_out_state
+# from examples.analyze_first import load_data, count_initial_nonzero, spit_out_state
 from scipy.stats import unitary_group
 from scipy.linalg import expm
 import matplotlib.pyplot as plt
+
+
+from examples.data_management import save_results, load_results
 
 
 
@@ -41,6 +44,7 @@ def check_gradient(A0, A_target, L, iterations, tolerance, cut_off=10*60*60):
     gd = ConjugateGradient(f, M, A0, max_iter, tol=tol, verbose=True)
     A, c, n, _ = gd.optimize()
     print(A.is_isometry(1e-14))
+    print(A.tensor.shape)
     print("done")
     print(c)
     return c
@@ -133,7 +137,7 @@ def plot_success_vs_eps(results):
     plt.show()
 
 samples=10
-iter=500
+iter=1000
 tol=1e-10
 
 results = []
@@ -179,13 +183,82 @@ def probe_general(d,D_search,D_target,L,it,tol,sample):
     return pos/sample    
 
 
-it = 500
+
+def C_as_function_of_D(d,D_target,D_range,L,it,tol,samples,override=False):
+    result=[]
+    for i in range(0,samples):    
+        this_sample = []
+        Atarget =UniformMps.random(D_target, d)
+        for D in D_range:
+            A0=UniformMps.random(D, d)
+            c = check_gradient(A0, Atarget, L, it, tol)
+            this_sample.append([D,c])
+        result.append(this_sample)    
+    # print(res)
+    save_results(result,"representability",f"D_target={D_target} L={L}",override)
+    return np.array(result)
+
+
+
+def stats_results(results):
+    """
+    results: array with shape (samples, len(D_range), 2)
+             like [[[D1, r11], [D2, r12]], 
+                    [[D1, r21], [D2, r22]], ...]
+    returns: array [[D1, avg, var], [D2, avg, var], ...]
+    """
+    results = np.array(results)
+    Ds = results[0, :, 0]                      # D values
+    values = results[:, :, 1]                  # all c-values
+    avg = values.mean(axis=0)                  # mean per D
+    var = values.var(axis=0, ddof=1)           # sample variance (unbiased)
+    return np.column_stack([Ds, avg, var])
+
+
+
+def plot_stats(stats):
+    """
+    stats: array of shape (len(D_range), 3)
+           columns = [D, average, variance]
+    """
+    stats = np.array(stats)
+    Ds = stats[:, 0]
+    avg = stats[:, 1]
+    var = stats[:, 2]
+
+    # Plot average vs D (log scale)
+    plt.figure(figsize=(6,4))
+    plt.plot(Ds, avg, marker='o')
+    plt.xlabel("D")
+    plt.ylabel("Average c (log scale)")
+    plt.yscale("log")
+    plt.title("Average vs D (log scale)")
+    plt.grid(True, which='both')
+    plt.show()
+
+    # Plot variance vs D (linear scale)
+    plt.figure(figsize=(6,4))
+    plt.plot(Ds, var, marker='o')
+    plt.xlabel("D")
+    plt.ylabel("Variance of c")
+    plt.title("Variance vs D")
+    plt.grid(True)
+    plt.show()
+
+
+it = 1000
 tol = 1e-10
 d = 2
-sample=10
 
-L=4
-D_search=16
-D_target=20
 
-probe_general(2,D_search,D_target,L,it,tol,sample)
+L=2
+D_target=10
+Drange=np.arange(2, 3)
+C_as_function_of_D(d,D_target,Drange,L,it,tol,1,True)
+testres=load_results("representability",f"D_target={D_target} L={L}")
+stats_results(testres)
+
+
+print(testres)
+
+plot_stats(stats_results(testres))

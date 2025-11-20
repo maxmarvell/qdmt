@@ -8,40 +8,67 @@ from qdmt.analysis import magnetization as mag
 from src.qdmt.evolve import *
 
 
+from pathlib import Path
+
+# Compute the absolute project root directory:
+# If this file lives in qdmt/examples/, then parents[1] = qdmt/
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+print(PROJECT_ROOT)
+# The results folder lives under project root
+RESULTS_DIR = PROJECT_ROOT / "results"
 
 
-def filepath_gen(dt: float, steps: int, tolerance: float, iterations: int, D: int, cut_off: float):
-    # path to the folder containing THIS script
-    here = os.path.dirname(__file__)
-    save_folder = os.path.join(here, "..", "results")  # one level up, into results/
-    os.makedirs(save_folder, exist_ok=True)  # create it if it doesn't exist
+def save_results(data, foldername, filename,override=False):
+    """
+    Saves data as a .npy file into results/
+    filename: name without extension (e.g. "run1")
+    """
+    folder = RESULTS_DIR  / foldername
+    os.makedirs(folder, exist_ok=True)
 
-    file_name=f"benchmark_dt={dt}_steps={steps}_tol={tolerance}_it={iterations}_D={D}_cut={cut_off}"
+    path = os.path.join(folder, filename + ".npy")
 
-    file_path = os.path.join(save_folder, file_name)
-    return  file_path
+    if os.path.exists(path) and not override:
+        print(f"File {path} already exists. Not overwriting (override=False).")
+        return
+    np.save(path, data)
+    print(f"Saved to {path}")
+
+
+def load_results(foldername,filename):
+    """
+    Loads data from results/
+    """
+
+    folder = RESULTS_DIR  / foldername
+    path = os.path.join(folder, filename + ".npy")
+    data = np.load(path, allow_pickle=True)
+    print(f"Loaded from {path}")
+    return data
+
+
+
+
+def filepath_gen(dt, steps, tolerance, iterations, D, cut_off):
+    filename = f"benchmark_dt={dt}_steps={steps}_tol={tolerance}_it={iterations}_D={D}_cut={cut_off}_trimmed_unfolded.npz"
+    return RESULTS_DIR / "datasets_unfolded" / filename
 
 
 
 
 def load_data(dt, steps, tolerance, iterations, D, cut_off):
-     # --- Configuration ---
-    # filename = "benchmark_dt=0.01_steps=100_tol=1e-08_it=500_D=4_cut=20.npz"
+    # Build the filename
+    filename = (
+        f"benchmark_dt={dt}_steps={steps}_tol={tolerance}"
+        f"_it={iterations}_D={D}_cut={cut_off}.npz"
+    )
 
-    
-        
-    # Compute absolute path to qdmt-main/results/
-    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))  # go up one level
-    results_dir = os.path.join(project_root, "results")
+    # Full absolute path to the .npz file
+    filepath = RESULTS_DIR / filename
 
-    filename = f"benchmark_dt={dt}_steps={steps}_tol={tolerance}_it={iterations}_D={D}_cut={cut_off}.npz"
-    filepath = os.path.join(results_dir, filename)
-
-    # --- Load data ---
-    data = np.load(filepath)
-    return data
-
-
+    # Load and return the data
+    return np.load(filepath)
 
 
 def count_initial_nonzero(arr, cutoff=1e-16):
@@ -72,37 +99,33 @@ def trim_data(data, l):
         trimmed[key] = arr[:l]
     return trimmed
 
-
 def save_trimmed_data(data, dt, steps, tolerance, iterations, D, cut_off):
-    # Base (original) path
+    # Get the original dataset path as a Path object
     original_path = filepath_gen(dt, steps, tolerance, iterations, D, cut_off)
 
-    # Folder that will hold trimmed datasets
-    trimmed_folder = os.path.join(
-        os.path.dirname(original_path),  # the results/ folder
-        "datasets_trimmed"
-    )
-    os.makedirs(trimmed_folder, exist_ok=True)
+    # Folder that will hold trimmed datasets: qdmt/results/datasets_trimmed
+    trimmed_folder = RESULTS_DIR / "datasets_trimmed"
+    trimmed_folder.mkdir(parents=True, exist_ok=True)
 
-    # Use same filename but with _trimmed suffix
-    base_name = os.path.basename(original_path)
+    # Same base name but with "_trimmed.npz"
+    base_name = original_path.stem         # filename without .npz
     trimmed_name = base_name + "_trimmed.npz"
 
-    save_path = os.path.join(trimmed_folder, trimmed_name)
+    save_path = trimmed_folder / trimmed_name
 
-    # --- AUTO-SKIP if already present ---
-    if os.path.exists(save_path) and False:
-        print(f"Trimmed dataset already exists: {save_path}")
-        return
+    # OPTIONAL: skip if already present
+    # if save_path.exists():
+    #     print(f"Trimmed dataset already exists: {save_path}")
+    #     return
 
-    # --- Save compressed in same format as original ---
+    # Save compressed
     np.savez_compressed(
         save_path,
         time=data["time"],
         state=data["state"],
         gradient_norm=data["gradient_norm"],
         cost=data["cost"],
-        duration=data["duration"]
+        duration=data["duration"],
     )
 
     print(f"Trimmed dataset saved to: {save_path}")
@@ -129,32 +152,23 @@ def prep_data(dt, steps, tolerance, iterations, D, cut_off, timerange = None):
     return data    
 
 
-
-import os
-import numpy as np
-
 def load_trimmed_data(dt, steps, tolerance, iterations, D, cut_off):
-    # Recreate the original untrimmed base path
+    # Original base file path (Path object)
     original_path = filepath_gen(dt, steps, tolerance, iterations, D, cut_off)
 
-    # Path to the trimmed dataset folder
-    trimmed_folder = os.path.join(
-        os.path.dirname(original_path),   # results/
-        "datasets_trimmed"
-    )
+    # Always use the global RESULTS_DIR / "datasets_trimmed"
+    trimmed_folder = RESULTS_DIR / "datasets_trimmed"
 
-    # Expected filename with suffix
-    base_name = os.path.basename(original_path)
-    trimmed_name = base_name + "_trimmed.npz"
-
-    load_path = os.path.join(trimmed_folder, trimmed_name)
+    # Remove ".npz" from base filename, append "_trimmed.npz"
+    trimmed_name = original_path.stem + "_trimmed.npz"
+    load_path = trimmed_folder / trimmed_name
 
     # Check existence
-    if not os.path.isfile(load_path):
+    if not load_path.exists():
         print(f"Trimmed dataset not found: {load_path}")
         return None
 
-    # Load and return dict-like object
+    # Load the trimmed dataset
     data = np.load(load_path)
 
     print(f"Loaded trimmed dataset: {load_path}")
@@ -167,7 +181,6 @@ def load_trimmed_data(dt, steps, tolerance, iterations, D, cut_off):
         "duration": data["duration"]
     }
 
-
 def unfold_data(
     data_trimmed,
     dt,
@@ -175,35 +188,41 @@ def unfold_data(
     tolerance,
     iterations,
     D,
-    cut_off,overwrite = False, L=4,g=1.05, h=-0.5, J=-1
+    cut_off,
+    overwrite=False,
+    L=4,
+    g=1.05,
+    h=-0.5,
+    J=-1
 ):
     """
     Take trimmed data (dict) and compute derived quantities:
-    norm, energy, renyi_entropy. Save as a new NPZ in
-    results/datasets_unfolded/, and return the extended dict.
+    norm, energy, renyi_entropy, etc. Save as a new NPZ file in
+    results/datasets_unfolded/ and return the extended dictionary.
     """
 
     state = data_trimmed["state"]
     cost = data_trimmed["cost"]
 
-    # --- derived quantities ---
-    # hard code delta_t here just for the hamiltonian generation, it doesnt do anything. we use just H not exp(iHt)
+    # --- Derived quantities ---
     model_H = TransverseFieldIsing(g=g, delta_t=0.1, h=h, J=J)
 
     print("compute norm")
-    norm = np.array(list(map(lambda x: cq.compute_norm(UniformMps(x)), state)))
-    print("compute energy")
-    energy = np.array(list(map(lambda x: cq.compute_energy(UniformMps(x), model_H), state)))
-    print("compute renyi")
-    renyi_entropy = np.array(list(map(lambda x: tools.compute_second_Reyni(UniformMps(x), L), state)))
-    print("compute log cost")
-    log_cost = np.array(list(map(lambda x: np.log(x), cost)))
-    # print(log_cost)
-    print("compute magnetization")
-    t_magnetization = np.array(list(map(lambda x: mag.transverse_magnetization(UniformMps(x)), state)))
-   
+    norm = np.array([cq.compute_norm(UniformMps(x)) for x in state])
 
-    # --- build extended data dict ---
+    print("compute energy")
+    energy = np.array([cq.compute_energy(UniformMps(x), model_H) for x in state])
+
+    print("compute renyi")
+    renyi_entropy = np.array([tools.compute_second_Reyni(UniformMps(x), L) for x in state])
+
+    print("compute log cost")
+    log_cost = np.log(cost)
+
+    # print("compute magnetization")
+    # t_magnetization = np.array([mag.transverse_magnetization(UniformMps(x)) for x in state])
+
+    # --- Build extended dict ---
     data_unfolded = {
         "time": data_trimmed["time"],
         "state": data_trimmed["state"],
@@ -214,74 +233,57 @@ def unfold_data(
         "energy": energy,
         "renyi_entropy": renyi_entropy,
         "log_cost": log_cost,
-        "t_magnetization": t_magnetization
+        # "t_magnetization": t_magnetization
     }
 
-    # --- save to results/datasets_unfolded/ ---
+    # --- Save path construction ---
 
-    # Use the same base filepath pattern as before
+    # Base path for the original dataset (Path object)
     original_path = filepath_gen(dt, steps, tolerance, iterations, D, cut_off)
 
-    # Folder parallel to datasets_trimmed
-    unfolded_folder = os.path.join(
-        os.path.dirname(original_path),  # results/
-        "datasets_unfolded"
-    )
-    os.makedirs(unfolded_folder, exist_ok=True)
+    # Save folder: qdmt/results/datasets_unfolded
+    unfolded_folder = RESULTS_DIR / "datasets_unfolded"
+    unfolded_folder.mkdir(parents=True, exist_ok=True)
 
-    base_name = os.path.basename(original_path)
-    # derived from trimmed data → keep "_trimmed" in lineage
+    # Add suffix "_trimmed_unfolded"
+    base_name = original_path.stem
     unfolded_name = base_name + "_trimmed_unfolded.npz"
-    save_path = os.path.join(unfolded_folder, unfolded_name)
 
-    # Auto-skip if already exists
-    if os.path.exists(save_path) and not overwrite:
+    save_path = unfolded_folder / unfolded_name
+
+    # Skip if exists
+    if save_path.exists() and not overwrite:
         print(f"Unfolded dataset already exists: {save_path}")
         return data_unfolded
 
+    # Save
     np.savez_compressed(
         save_path,
-        time=data_unfolded["time"],
-        state=data_unfolded["state"],
-        gradient_norm=data_unfolded["gradient_norm"],
-        cost=data_unfolded["cost"],
-        duration=data_unfolded["duration"],
-        norm=data_unfolded["norm"],
-        energy=data_unfolded["energy"],
-        renyi_entropy=data_unfolded["renyi_entropy"],
-        log_cost=data_unfolded["log_cost"],
-        t_magnetization=data_unfolded["t_magnetization"]
-        
+        **data_unfolded
     )
 
     print(f"Unfolded dataset saved to: {save_path}")
 
     return data_unfolded
 
-
-
-
-def load_unfolded_data(dt, steps, tolerance, iterations, D, cut_off,L=4,g=1.05, h=-0.5, J=-1):
+def load_unfolded_data(dt, steps, tolerance, iterations, D, cut_off, L=4, g=1.05, h=-0.5, J=-1):
     """
     Load unfolded data saved in results/datasets_unfolded/.
     Returns a dict or None if file not found.
     """
 
-    # Base untrimmed filepath
     original_path = filepath_gen(dt, steps, tolerance, iterations, D, cut_off)
 
-    # Folder parallel to datasets_trimmed
-    unfolded_folder = os.path.join(
-        os.path.dirname(original_path),   # results/
-        "datasets_unfolded"
-    )
+    # Correct folder
+    unfolded_folder = RESULTS_DIR / "datasets_unfolded"
 
-    base_name = os.path.basename(original_path)
-    unfolded_name = base_name + "_trimmed_unfolded.npz"
-    load_path = os.path.join(unfolded_folder, unfolded_name)
+    # Avoid double suffix
+    base = original_path.stem.replace("_trimmed_unfolded", "")
+    unfolded_name = base + "_trimmed_unfolded.npz"
 
-    # Check existence
-    if not os.path.isfile(load_path):
+    load_path = unfolded_folder / unfolded_name
+
+    if not load_path.exists():
         print(f"Unfolded dataset not found: {load_path}")
         return None
 

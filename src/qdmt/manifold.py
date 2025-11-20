@@ -32,7 +32,7 @@ class Grassmann(AbstractManifold):
     def retract(self, W, X, alpha):
 
         # print(" before retraction")
-        UniformMps(W).is_isometry()
+        # UniformMps(W).is_isometry()
         H = W.conj().T @ X
         h_norm = np.linalg.norm(H, ord="fro")
         # print(f"‖W†X‖ = {h_norm:.10e}  (should be ≈ 0 if X is horizontal)")
