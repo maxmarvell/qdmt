@@ -135,8 +135,13 @@ def linesearch(
         # update tensor and slope
         W_prime, X_prime = M.retract(W, X, alpha)
 
+
+
         # compute cost and gradient at new point
         B = UniformMps(W_prime)
+
+     
+
         rB = TransferMatrix.new(B, B).right_fixed_point()
         C_prime, G_prime = fg(B, rB)
 
@@ -158,6 +163,7 @@ def linesearch(
     # Try initial step
     p_init, x_init, g_init = take_step(alpha0)
     if satisfies_wolfe(p_init, p0, c1, c2, epsilon):
+        # print("Did with initial.")
         return p_init.alpha, x_init, p_init.C, g_init, True
 
     # Bracketing phase

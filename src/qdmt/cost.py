@@ -153,6 +153,10 @@ class EvolvedHilbertSchmidt(AbstractCostFunction):
 
             self.U1, self.U2 = model.trotter_second_order()
 
+            # print(self.U1)
+
+            # print(self.U2)
+
             # compute all invarients of the cost function
             self.purity_A = self._compute_second_trotterized_purity()
             self._compute_auxillary_second_trotterized()
@@ -352,9 +356,9 @@ class EvolvedHilbertSchmidt(AbstractCostFunction):
     def _compute_trace_product_rhoA_rhoB(self, B: UniformMps, rB: RightFixedPoint) -> np.complex128:
 
         # heurisistic to determine best contraction pathway
-        DA = self.A.d
-        DB = B.d
-        d = B.p
+        DA = self.A.D
+        DB = B.D
+        d = B.d
         L = self.L
 
         if (DA**3*DB**3*d**6*np.log(L) <= d**(2*L)):
@@ -422,9 +426,9 @@ class EvolvedHilbertSchmidt(AbstractCostFunction):
     def _compute_derivative_rho_A_rho_B(self, B: UniformMps, rB: RightFixedPoint) -> npt.NDArray[np.complex128]:
 
         # heurisistic to determine best contraction pathway
-        DA = self.A.d
-        DB = B.d
-        d = B.p
+        DA = self.A.D
+        DB = B.D
+        d = B.d
         L = self.L
 
         if (DA**3*DB**5*d**7*np.log(L) <= d**(2*L)*L*DB**2*d):
@@ -634,7 +638,7 @@ class EvolvedHilbertSchmidt(AbstractCostFunction):
         chain = B.to_mps_chain(self.L)
         sub_chains = [B.to_mps_chain(i).conj(), B.to_mps_chain(L-i-1).conj()]
 
-        tensors = [chain, *sub_chains, np.eye(B.p), rB.tensor]
+        tensors = [chain, *sub_chains, np.eye(B.d), rB.tensor]
         indices = [
             [1] + [-i for i in range(1, L+1)] + [2],
             [1] + [-i for i in range(L+1, L+1+i)] + [-2*L-1],

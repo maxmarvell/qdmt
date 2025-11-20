@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 import numpy as np
 from ncon import ncon
+import sys
 
 from qdmt.manifold import AbstractManifold, euclidian_metric as inner
 from qdmt.cost import AbstractCostFunction
@@ -56,7 +57,6 @@ class GradientDescent(AbstractOptimizer):
         self.verbose = verbose
 
     def optimize(self):
-        
         W = self.B0.matrix
         C, G = self.fg(self.B0)
         cost_history = [C]
@@ -89,17 +89,21 @@ class GradientDescent(AbstractOptimizer):
 
             alpha, W, C, G, success = linesearch(self.tmp_f, self.M, W, X, C, G, alpha0=alpha)
 
-            B = UniformMps(W)
-            
-            if not B.check_left_orthonormal():
-                print("Warning: Not left orthonormal left orthonormalizing!")
-                B.left_orthorganlize()
-                W = B.matrix
-
             if not success:
+                alpha = min(alpha, 0.1)
                 W, _ = self.M.retract(W, X, alpha)
-                C, D = self.f.fg(B)
-                G = self.M.project(W, D)
+                B = UniformMps(W)
+                rB = TransferMatrix.new(B, B).right_fixed_point()
+                C, G = self.fg(B, rB)
+            else:
+                alpha = min(alpha*1.1, 1)
+                B = UniformMps(W)
+                rB = TransferMatrix.new(B, B).right_fixed_point()
+
+            if not B.is_isometry():
+                print("Warning: Not left orthonormal left orthonormalizing!")
+                B = B.orthonormalize()
+                W = B.V
 
             iter += 1
 
@@ -191,6 +195,13 @@ class ConjugateGradient(AbstractOptimizer):
         W = self.B0.V
         rB = TransferMatrix.new(self.B0, self.B0).right_fixed_point()
         C, G = self.fg(self.B0, rB)
+
+        # print(self.B0)
+        # print("C coming")
+        # print(C)
+        # sys.exit()
+
+
         cost_history = [C]
 
         norm_grad = np.sqrt(inner(G, G))
@@ -208,6 +219,7 @@ class ConjugateGradient(AbstractOptimizer):
 
         # --- Main optimization loop ---
         iter = 0
+        flag = False
         while True:
             if self.precondtion:
                 G_tilde = preconditioning(G, rB.tensor)
@@ -228,9 +240,16 @@ class ConjugateGradient(AbstractOptimizer):
             W_prev = W
             X_prev = X
             G_prev = G
+            C_prev = C
             G_tilde_prev = G_tilde
 
+
+            # print(f"iter={iter} pre line search")
+            # UniformMps(W).is_isometry()
+            
             alpha, W, C, G, success = linesearch(self.fg, self.M, W, X, C, G, alpha0=alpha)
+            # print(f"iter={iter} after line search")
+            # UniformMps(W).is_isometry()
 
             if not success:
                 alpha = min(alpha, 0.1)
@@ -247,25 +266,44 @@ class ConjugateGradient(AbstractOptimizer):
                 print("Warning: Not left orthonormal left orthonormalizing!")
                 B = B.orthonormalize()
                 W = B.V
+         
+            # if not B.is_isometry():
+            #     C, G = self.fg(B, rB)
+            #     print("Warning: Not left orthonormal left orthonormalizing!")
+            #     print(f" BEFORE CG: iter {iter:4d}: f = {C:.8e}, ‖∇f‖ = {norm_grad:.4e}, α = {alpha:.2e}, β = {beta:.2e}")
+            #     flag = True
+            #     # sys.exit()
+            #     B = B.orthonormalize()
+            #     W = B.V
+            #     B = UniformMps(W)
+            #     # added these two lines for suspected bug
+            #     rB = TransferMatrix.new(B, B).right_fixed_point()
+            #     C, G = self.fg(B, rB)
+            #     print(f" after CG: iter {iter:4d}: f = {C:.8e}, ‖∇f‖ = {norm_grad:.4e}, α = {alpha:.2e}, β = {beta:.2e}")
 
+
+            # if flag and iter > 600:
+            #     sys.exit()
             iter += 1
 
             cost_history.append(C)
             norm_grad = np.sqrt(inner(G, G))
             grad_history.append(norm_grad)
 
-            if norm_grad <= self.tol or iter >= self.max_iter:
+            if norm_grad <= self.tol or iter >= self.max_iter or np.abs(C)<=2*1e-16:
                 break
 
             if self.verbose == True and iter % 10 == 0:
                 print(f"CG: iter {iter:4d}: f = {C:.8e}, ‖∇f‖ = {norm_grad:.4e}, α = {alpha:.2e}, β = {beta:.2e}")
 
+            # print("some transport")
             G_prev = self.M.transport(G_prev, W_prev, X_prev, alpha, W)
             if self.precondtion:
                 G_tilde_prev = self.M.transport(G_tilde_prev, W_prev, X_prev, alpha, W)
             else:
                 G_tilde_prev = G_prev
             X_prev = self.M.transport(X_prev, W_prev, X_prev, alpha, W)  
+            # print("loop done")    
 
         print(f"\nCG: Converged! iter {iter:4d}: f = {C:.8e}, ‖∇f‖ = {norm_grad:.4e}, α = {alpha:.2e}, β = {beta:.2e}")
 

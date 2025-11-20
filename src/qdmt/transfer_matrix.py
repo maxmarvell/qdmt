@@ -135,7 +135,7 @@ class TransferMatrix(AbstractTransferMatrix):
         return obj
     
     def _compute_derivative(self) -> np.ndarray:
-        if self.A == None or self.B == None:
+        if self.A is None or self.B is None:
             raise ValueError("Can only call _compute_derivative for non-composite transfer matrix object.")
         Ib = np.eye(self.Db)
         return ncon([self.A, Ib, Ib], ((-1, -6, -3), (-2, -5), (-7, -4)))
@@ -187,7 +187,7 @@ class TransferMatrix(AbstractTransferMatrix):
             LRdL = ncon([L.derivative(), R.tensor], indices)
 
             indices = [[-1, -2, 1, 2], [1, 2, -3, -4, -5, -6, -7]]
-            LRdR = ncon([L.array, R.derivative()], indices)
+            LRdR = ncon([L.tensor, R.derivative()], indices)
 
             self._derivative = LRdL + LRdR
             return self._derivative
@@ -214,7 +214,12 @@ class TransferMatrix(AbstractTransferMatrix):
             r /= (np.trace(r) / np.abs(np.trace(r)))
             r = (r + np.conj(r).T) / 2
             r *= np.sign(np.trace(r))
+                    # --- NEW: normalize trace to 1 ---
+            tr = np.trace(r).real
+            r /= tr
             return RightFixedPoint(r, self.A)
+        
+
 
         raise LinAlgError("Transfer matrix has no eigenvalue 1: right fixed point did not converge.")
 
@@ -365,8 +370,8 @@ class SecondOrderTrotterizedTransferMatrix(AbstractTransferMatrix):
     def __matmul__(self, other):
         if isinstance(other, SecondOrderTrotterizedTransferMatrix):
             indices = [[-1, -2, -3, -4, 1, 2, 3, 4], [1, 2, 3, 4, -5, -6, -7, -8]]
-            tensor = ncon([self.array, other.array], indices, order=[1, 4, 2, 3])
-            return SecondOrderTrotterizedTransferMatrix(tensor, [self, other])
+            tensor = ncon([self._tensor, other._tensor], indices, order=[1, 4, 2, 3])
+            return SecondOrderTrotterizedTransferMatrix(tensor, tape=[self, other])
             
         raise NotImplementedError()
     
@@ -391,21 +396,26 @@ class SecondOrderTrotterizedTransferMatrix(AbstractTransferMatrix):
 
     def _compute_derivative(self) -> None:
 
-        if self.A == None or self.B == None or self.U1 == None or self.U2 == None:
+        if self.A is None or self.B is None or self.U1 is None or self.U2 is None:
             raise ValueError("Can only call _compute_derivative for non-composite transfer matrix object.")
         
         A, B, U1, U2 = self.A, self.B, self.U1, self.U2
 
-        tensors = [A, A, U1, U2, U1]
+        tensors = [A.tensor, A.tensor, U1, U2, U1]
         indices = [[-1, 1, 2], [2, 3, -5], [1, 3, 4, -6], [-2, 4, 5, -7], [-3, 5, -4, -8]]
         order = [2, 1, 3, 4, 5]
         res = ncon(tensors, indices, order=order)
 
-        tensors = [np.eye(self.Db), B.conj(), res]
+        tensors = [np.eye(self.Db), B.tensor.conj(), res]
         indices = [[-4, -9], [-11, 1, -8], [-1, -2, -3, -10, -5, -6, -7, 1]]
+
+        # for i, X in enumerate(tensors):
+        #     print(f"t[{i}] shape={X.shape}  indices={indices[i]}  (rank={X.ndim})")
+
+
         deriv_1 = ncon(tensors, indices)
 
-        tensors = [B.conj(), res, np.eye(self.Db)]
+        tensors = [B.tensor.conj(), res, np.eye(self.Db)]
         indices = [[-4, 1, -9], [-1, -2, -3, 1, -5, -6, -7, -10], [-11, -8]]
         deriv_2 = ncon(tensors, indices)
 
@@ -426,14 +436,14 @@ class SecondOrderTrotterizedTransferMatrix(AbstractTransferMatrix):
             L = self.tape[0]
             R = self.tape[1]
 
-            tensors = [L.derivative(), R.array]
+            tensors = [L.derivative(), R.tensor]
             indices = [
                 [-1, -2, -3, -4, 1, 2, 3, 4, -9, -10, -11], 
                 [1, 2, 3, 4, -5, -6, -7, -8]
             ]
             D1 = ncon(tensors, indices, order=[1, 4, 2, 3])
             
-            tensors = [L.array, R.derivative()]
+            tensors = [L.tensor, R.derivative()]
             indices = [
                 [-1, -2, -3, -4, 1, 2, 3, 4], 
                 [1, 2, 3, 4, -5, -6, -7, -8, -9, -10, -11]
