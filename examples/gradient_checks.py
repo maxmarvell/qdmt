@@ -188,16 +188,20 @@ def probe_general(d,D_search,D_target,L,it,tol,sample):
 
 def C_as_function_of_D(d,D_target,D_range,L,it,tol,samples,override=False):
     result=[]
-    for i in range(0,samples):    
+    for i in range(0,samples):
+          
         this_sample = []
         Atarget =UniformMps.random(D_target, d)
         for D in D_range:
+            print(f"D={D} sample {i}")    
             A0=UniformMps.random(D, d)
             c = check_gradient(A0, Atarget, L, it, tol)
             this_sample.append([D,c])
+            save_results(result,"representability",f"D_target={D_target} L={L} samples={samples} temp{D}{i} ",override)
         result.append(this_sample)    
+        done()
     # print(res)
-    save_results(result,"representability",f"D_target={D_target} L={L}",override)
+    save_results(result,"representability",f"D_target={D_target} L={L} samples={samples}",override)
     return np.array(result)
 
 
@@ -254,20 +258,24 @@ def done():
     print("Done at:", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
 
 
-it = 1000
-tol = 1e-10
+it = 2000
+tol = 1e-11
 d = 2
 
 
-L=2
-D_target=10
-Drange=np.arange(2, 5)
-C_as_function_of_D(d,D_target,Drange,L,it,tol,1,True)
-done()
-testres=load_results("representability",f"D_target={D_target} L={L}")
-stats_results(testres)
+# L=2
+# D_target=12
+# Drange=np.arange(2, 10)
+# C_as_function_of_D(d,D_target,Drange,L,it,tol,20,True)
+# done()
+L=4
+D_target=20
+Drange=np.arange(2, 13)
+C_as_function_of_D(d,D_target,Drange,L,it,tol,10,True)
+# testres=load_results("representability",f"D_target={D_target} L={L}")
+# stats_results(testres)
 
 
-print(testres)
+# print(testres)
 
-plot_stats(stats_results(testres))
+# plot_stats(stats_results(testres))
